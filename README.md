@@ -362,7 +362,7 @@ rtt min/avg/max/mdev = 41.3/41.4/41.6/0.127 ms
 - **USN:** PES1UG24AM161
 - **Course:** Operating Systems / Networks (PES University)
 - **Date:** April 2025
-- **Repository:** [GitHub Link]
+- **Repository:** [GitHub Link](https://github.com/Mirunjai/network-delay-measurement/)
 
 ---
 
