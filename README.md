@@ -360,7 +360,7 @@ rtt min/avg/max/mdev = 41.3/41.4/41.6/0.127 ms
 
 - **Student:** Mirunjai Suresh Kumar
 - **USN:** PES1UG24AM161
-- **Course:** Operating Systems / Networks (PES University)
+- **Course:** Computer Networks (PES University)
 - **Date:** April 2025
 - **Repository:** [GitHub Link](https://github.com/Mirunjai/network-delay-measurement/)
 
