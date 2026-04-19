@@ -57,11 +57,10 @@ network-delay-measurement/
 ├── run_experiment.sh         # Bash script to execute tests
 ├── README.md                 # This file
 ├── RESULTS.md               # Experimental results & analysis
-└── screenshots/             # Proof of execution
-    ├── topology_setup.png
-    ├── experiment_5ms.png
-    ├── experiment_20ms.png
-    └── rtt_graph.png
+└── delay1.png             # Proof of execution
+└── delay2.png
+└── rtt_vs_delay.png
+
 ```
 
 ---
