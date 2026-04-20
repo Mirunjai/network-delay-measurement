@@ -44,24 +44,6 @@ h1 ─── s1 ─── s2 ─── s3 ─── h3
 | **Python** | 3.6+ | Controller logic & scripting |
 | **Linux (WSL/Ubuntu)** | 20.04 LTS | Operating system |
 | **ping** | - | RTT measurement utility |
-| **Wireshark** | - | Network packet analysis (optional) |
-
----
-
-## 📦 Project Structure
-
-```
-network-delay-measurement/
-├── controller.py              # POX OpenFlow controller
-├── run_experiment.sh         # Bash script to execute tests
-├── README.md                 # This file
-├── RESULTS.md               # Experimental results & analysis
-└── screenshots/             # Proof of execution
-    ├── topology_setup.png
-    ├── experiment_5ms.png
-    ├── experiment_20ms.png
-    └── rtt_graph.png
-```
 
 ---
 
@@ -96,14 +78,6 @@ sudo mn --controller=remote,port=6633 --topo linear,3 --link tc,delay=20ms
 **Step 3: Run Measurements (Inside Mininet CLI)**
 ```mininet
 mininet> h1 ping -c 5 h3
-```
-
-**Sample output:**
-```
-PING 10.0.0.3 (10.0.0.3) 56(84) bytes of data.
-64 bytes from 10.0.0.3: icmp_seq=1 ttl=64 time=41.5 ms
-...
-rtt min/avg/max/mdev = 40.7/41.5/42.6/0.650 ms
 ```
 
 ---
@@ -147,178 +121,207 @@ For our topology: RTT = 2 × (4 × d) = 8d
 
 ---
 
-## 🔌 SDN Controller Logic
+## 4. Experimental Procedure and Results
 
-### How It Works
+### 4.1 POX Controller Startup
 
-The POX controller uses a learning switch approach:
+The POX controller is initialized with the custom learning switch controller:
 
-1. **First packet arrives** → controller receives `packet_in` event
-2. **Controller learns** the source MAC address and port
-3. **Controller checks** if it knows the destination
-   - If yes: installs flow rule and forwards
-   - If no: floods to all ports (discovery phase)
-4. **Next packets** use the installed flow rule (no controller overhead)
+![alt text](screenshots/pox.png)
 
-### Flow Rule Details
-
-**What gets installed:**
-- Match: Source MAC + Destination MAC
-- Action: Forward to the learned port
-- Priority: 100
-- Timeout: 10 seconds idle, 30 seconds hard
-
-This is efficient because after the first packet, subsequent packets are forwarded in-switch without bothering the controller.
+The controller successfully loads and waits for switch connections on port 6633. Multiple OpenFlow flow events are logged as the controller manages switch initialization and packet forwarding.
 
 ---
 
-## 📈 Performance Analysis
+### 4.2 Experiment 1: 20ms Link Delay Topology
 
-### Latency Breakdown (20ms Case)
-
-```
-Total RTT = 161 ms
-├─ Propagation delay = 160 ms (4 hops × 20ms × 2 directions)
-└─ Processing overhead ≈ 1 ms (controller + switch operations)
+**Command executed:**
+```bash
+sudo mn --controller=remote,port=6633 --topo linear,3 --link tc,delay=20ms
 ```
 
-### Key Insight
+![alt text](screenshots/delay2.png)
 
-The delay is mostly propagation (as expected). The controller processing is negligible, confirming that SDN doesn't add significant overhead once flow rules are installed.
-
-### Bandwidth Impact
-
-With high delay (20ms), TCP performance drops because:
-- Longer round-trip times
-- Wider congestion windows needed
-- More retransmission timeouts
-
-This is why delay-sensitive applications (VoIP, gaming) need careful network design.
+The topology creates 3 switches with 4 links, each configured with 20ms delay. The output shows:
+- Topology creation with all hosts and switches initialized
+- Pingall test: 100% connectivity (0% packet loss)
+- h1 to h3 ping results showing approximately 161ms RTT
+- Statistics confirm 5 packets transmitted and received with average delay of ~161ms
 
 ---
 
-## ✅ Validation & Testing
+### 4.3 Experiment 2: 5ms Link Delay Topology
 
-We tested three scenarios to confirm everything works:
+**Command executed:**
+```bash
+sudo mn --controller=remote,port=6633 --topo linear,3 --link tc,delay=5ms
+```
 
-### Test 1: Basic Connectivity
-```mininet
+![alt text](screenshots/delay1.png)
+
+With 5ms per-link delay, the topology shows:
+- Identical topology structure as 20ms case
+- Pingall test: 100% connectivity (0% packet loss)
+- h1 to h3 ping results showing approximately 41-42ms RTT
+- Statistics show min/avg/max values clustering around 41ms
+- Experiment completed in ~193 seconds
+
+---
+
+## 5. Results and Analysis
+
+### 5.2 RTT vs Link Delay Graph
+
+![alt text](screenshots/rtt_vs_delay.png)
+
+The graph clearly demonstrates the linear relationship between per-link delay and observed RTT:
+- At 5ms delay: RTT ≈ 41.5ms
+- At 20ms delay: RTT ≈ 161ms
+- Linear trend: RTT = 8d + overhead
+
+### 5.3 Theoretical Analysis
+
+Formula for RTT in linear topology:
+```
+RTT = 2 × (Number of Hops × Delay per Link)
+```
+
+For our 4-hop topology:
+```
+RTT = 2 × (4 × d) = 8d
+```
+
+**Case 1 (5ms):**
+- RTT = 8 × 5 = 40ms
+- Observed = 41.5ms → Error = 3.75%
+
+**Case 2 (20ms):**
+- RTT = 8 × 20 = 160ms
+- Observed = 161ms → Error = 0.625%
+
+### 5.4 Key Findings
+- RTT scales linearly with link delay - doubling delay increases RTT by 4x
+- Mininet accurately simulates real network delay behavior
+- Multi-hop topology amplifies delay effect (4 hops = 8x multiplier)
+- OpenFlow flow rule installation doesn't add significant latency
+- SDN-based approach successfully manages packet forwarding
+
+---
+
+## 6. SDN Controller Implementation
+
+### 6.1 Controller Logic
+
+The POX controller implements a learning switch pattern:
+
+1. Switch connects → Controller registers connection
+2. Packet arrives at switch → Switch sends packet_in to controller
+3. Controller extracts source MAC and port information
+4. Controller learns MAC-to-port mapping
+5. If destination is known:
+   - Install OpenFlow flow rule
+   - Forward packet to learned port
+6. If destination is unknown → Flood to all ports
+
+### 6.2 Flow Rule Design
+
+Flow rules installed have the following characteristics:
+- **Match:** Source MAC + Destination MAC + Ethernet type
+- **Action:** Forward to learned output port
+- **Priority:** 100 (standard forwarding priority)
+- **Idle Timeout:** 10 seconds (remove rule if inactive)
+- **Hard Timeout:** 30 seconds (remove rule regardless)
+
+### 6.3 Performance Benefit
+
+After initial learning phase, all packets use pre-installed rules, eliminating controller overhead. This demonstrates the efficiency of SDN for high-throughput forwarding.
+
+---
+
+## 7. Validation and Testing
+
+### 7.1 Test Results
+
+Three validation tests confirm correct behavior:
+
+**Test 1 - Basic Connectivity**
+- Command: `h1 ping -c 5 h3`
+- Result: 100% success rate, stable RTT within expected range ✓
+
+**Test 2 - Multi-host Reachability**
+- Command: `pingall`
+- Result: All hosts reach each other with 0% packet loss ✓
+
+**Test 3 - Flow Table Verification**
+- Command: `s1 dpctl dump-flows`
+- Result: Flow rules installed with correct match/action fields ✓
+
+### 7.2 Validation Summary
+
+All experimental measurements fall within 4% of theoretical predictions, confirming:
+- Mininet accurately simulates network delays
+- POX controller correctly implements OpenFlow
+- Linear topology provides predictable delay accumulation
+- Flow rule installation is efficient and correct
+
+---
+
+## 8. Conclusion
+
+### 8.1 Summary of Achievement
+
+This project successfully demonstrates an SDN-based network delay measurement system. Key achievements include:
+- Implemented a complete SDN controller using POX with packet handling and flow rule installation
+- Created a multi-hop linear topology that accurately demonstrates delay accumulation
+- Measured RTT under two delay scenarios with validation against theoretical predictions
+- Achieved measurement accuracy within 0.6-3.75% error margin
+- Demonstrated OpenFlow protocol functionality and SDN benefits
+
+### 8.2 Learning Outcomes
+
+Through this project, the following technical competencies were developed:
+- Understanding of SDN architecture and OpenFlow protocol
+- Practical experience with Mininet network simulation
+- Ability to design and implement SDN controllers in Python
+- Network performance measurement and analysis skills
+- Understanding of delay-sensitive network design
+
+### 8.3 Project Impact
+
+This project demonstrates that SDN provides effective control over network behavior, allowing dynamic configuration and measurement of network performance. The linear scaling of RTT with delay validates the predictability of multi-hop networks, which is critical for designing delay-sensitive applications like VoIP and online gaming.
+
+---
+
+## 9. Appendix
+
+### 9.1 Command Reference
+
+**POX Controller Startup:**
+```bash
+cd ~/pox && ./pox.py py.controller
+```
+
+**Mininet Topology (5ms delay):**
+```bash
+sudo mn --controller=remote,port=6633 --topo linear,3 --link tc,delay=5ms
+```
+
+**Mininet Topology (20ms delay):**
+```bash
+sudo mn --controller=remote,port=6633 --topo linear,3 --link tc,delay=20ms
+```
+
+**Run Measurements:**
+```bash
 mininet> h1 ping -c 5 h3
 ```
-**Result:** 0% packet loss, stable RTT ✓
 
-### Test 2: Multiple Hosts
-```mininet
-mininet> pingall
-```
-**Result:** All hosts can reach each other ✓
+### 9.2 References
 
-### Test 3: Flow Table Check
-```mininet
-mininet> s1 dpctl dump-flows
-```
-**Result:** Flow rules installed correctly with proper match/action fields ✓
-
-All tests passed, confirming the controller and topology work as expected.
-
----
-
-## 🔧 Code Explanation
-
-### What controller.py Does
-
-**Main functions:**
-
-1. **`launch()`** - Entry point that registers the controller with POX
-2. **`start_switch(event)`** - Called when a switch connects
-3. **`packet_in_handler(event)`** - Processes packets from switches
-4. **`install_flow_rule()`** - Creates and installs OpenFlow rules
-
-### Design Approach
-
-We chose a **learning switch** because:
-- Simple to understand and implement
-- Shows the core SDN concept (dynamic flow rules)
-- Easy to validate with ping tests
-- Scales to show multi-hop effects
-
-### Why This Works
-
-The learning switch learns paths on-demand. The first packet triggers the controller, which then installs a rule. Future packets use the rule directly, avoiding controller overhead. This demonstrates the efficiency of SDN.
-
----
-
-## 📊 Expected Output
-
-### From POX Controller (Terminal 1)
-```
-INFO:core:POX 0.7.0 (gar) is up.
-INFO:openflow.of_01:[00-00-00-00-00-01 1] connected
-INFO:controller:Packet_in: Switch 1, Port 1, Src: 00:00:00:00:00:01
-INFO:controller:Flow rule installed via port 2
-```
-
-### From Mininet (Terminal 2)
-```
-mininet> h1 ping -c 5 h3
-PING 10.0.0.3 (10.0.0.3) 56(84) bytes of data.
-64 bytes from 10.0.0.3: icmp_seq=1 ttl=64 time=41.6 ms
-64 bytes from 10.0.0.3: icmp_seq=2 ttl=64 time=41.5 ms
-...
-rtt min/avg/max/mdev = 41.3/41.5/41.6/0.127 ms
-```
-
-That's it. Clean output, clear results.
-
----
-
-## 🎓 SDN Concepts Demonstrated
-
-### 1. Controller-Switch Communication
-- Switches connect to controller via TCP (port 6633)
-- Switches send `packet_in` events when they don't know what to do
-- Controller sends `flow_mod` commands to install rules
-- This is OpenFlow protocol in action
-
-### 2. Flow Rules
-A flow rule says: "If you see packets that match X, then do Y"
-- **Match:** Source MAC = h1, Destination MAC = h3
-- **Action:** Forward to port 2
-- **Benefit:** No need to ask controller every time
-
-### 3. Network Programmability
-Instead of predefined routing, SDN lets you write custom logic in Python. You control packet forwarding rules in real-time. This is powerful for:
-- Load balancing
-- Security policies
-- Traffic engineering
-- Research and testing
-
-### 4. Performance Metrics
-We measured:
-- **RTT** - How long for a packet to make a round trip
-- **Consistency** - Do results repeat reliably?
-- **Accuracy** - Do measurements match theory?
-
----
-
-## 🐛 Troubleshooting
-
-| Problem | Fix |
-|---------|-----|
-| POX won't connect | Make sure you started POX first and it's on port 6633 |
-| RTT is too high | Check that delay is applied with `tc` (Linux Traffic Control) |
-| Ping fails | Make sure controllers and switches are running; try `pingall` first |
-| Flow rules missing | Verify controller code is running; check POX logs |
-| Network won't start | Kill any old Mininet: `sudo pkill -f mininet` |
-
----
-
-## 📚 References
-
-- POX Controller: https://github.com/noxrepo/pox
-- Mininet: http://mininet.org
-- OpenFlow Spec: https://opennetworking.org/
-- Linux tc Command: `man tc`
+- [1] POX OpenFlow Controller - https://github.com/noxrepo/pox
+- [2] Mininet Network Emulator - http://mininet.org
+- [3] OpenFlow 1.0 Specification - https://opennetworking.org/
+- [4] Linux Traffic Control (tc) - https://man7.org/linux/man-pages/man8/tc.8.html
 
 ---
 
